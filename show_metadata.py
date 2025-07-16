@@ -1,113 +1,107 @@
-# show_metadata.py
-
-import os
 import h5py
 import cv2
-import argparse
-from tkinter import Tk, filedialog
+import numpy as np
+from tkinter import filedialog, Tk
 
-def select_file():
-    root = Tk()
-    root.withdraw()
-    file_path = filedialog.askopenfilename(
-        title="Select HDF5 or video file",
-        filetypes=[
-            ("Supported files", "*.h5 *.hdf5 *.mp4 *.avi"),
-            ("HDF5 files", "*.h5 *.hdf5"),
-            ("Video files", "*.mp4 *.avi"),
-            ("All files", "*.*")
-        ]
-    )
-    return file_path
+def select_h5_file():
+    Tk().withdraw()
+    return filedialog.askopenfilename(filetypes=[("HDF5 Files", "*.h5 *.hdf5")])
 
-def show_hdf5_metadata(file_path, export=False):
-    output_lines = []
-    output_lines.append(f"[HDF5] Metadata for: {file_path}")
+def normalize_centroid(centroid_arcsec, frame_size_arcsec=10, image_dim=128):
+    """Convert arcseconds to pixels, assuming centered field of view."""
+    scale = image_dim / frame_size_arcsec  # pixels per arcsec
+    return (centroid_arcsec * scale) + image_dim / 2
 
-    with h5py.File(file_path, 'r') as f:
-        if f.attrs:
-            output_lines.append("\n[ROOT ATTRIBUTES]")
-            for key, val in f.attrs.items():
-                output_lines.append(f"{key}: {val}  <-- (Header: '{key}')")
+def load_h5_frames_and_centroids(filepath):
+    with h5py.File(filepath, 'r') as f:
+        # Video frames
+        images = f['images'][:]
+        images2 = f['images2'][:] if 'images2' in f else None
 
-        def recurse(name, obj):
-            if isinstance(obj, h5py.Group):
-                output_lines.append(f"\n[GROUP] {name}")
-                for k, v in obj.attrs.items():
-                    output_lines.append(f"  {k}: {v}  <-- (Header: '{k}')")
-            elif isinstance(obj, h5py.Dataset):
-                output_lines.append(f"\n[DATASET] {name}")
-                output_lines.append(f"  Shape: {obj.shape}")
-                output_lines.append(f"  Dtype: {obj.dtype}")
-                for k, v in obj.attrs.items():
-                    output_lines.append(f"  {k}: {v}  <-- (Header: '{k}')")
+        # Centroids
+        xcen = f.get('xcen_arcsec', None)
+        ycen = f.get('ycen_arcsec', None)
+        xcen2 = f.get('xcen2_arcsec', None)
+        ycen2 = f.get('ycen2_arcsec', None)
 
-        f.visititems(recurse)
+        centroids = {
+            "xcen": xcen[:] if xcen else None,
+            "ycen": ycen[:] if ycen else None,
+            "xcen2": xcen2[:] if xcen2 else None,
+            "ycen2": ycen2[:] if ycen2 else None,
+        }
 
-    for line in output_lines:
-        print(line)
+    return images, images2, centroids
 
-    if export:
-        out_file = os.path.splitext(file_path)[0] + "_metadata.txt"
-        with open(out_file, 'w') as f_out:
-            f_out.write("\n".join(output_lines))
-        print(f"\n[INFO] Metadata exported to: {out_file}")
+def draw_centroid(frame, x_arcsec, y_arcsec, color=(0, 255, 0), label=None):
+    if x_arcsec is None or y_arcsec is None:
+        return frame
+    x_px = int(normalize_centroid(x_arcsec))
+    y_px = int(normalize_centroid(y_arcsec))
+    frame = cv2.circle(frame.copy(), (x_px, y_px), 4, color, -1)
+    if label:
+        cv2.putText(frame, label, (x_px + 5, y_px - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+    return frame
 
-def show_video_metadata(file_path, export=False):
-    cap = cv2.VideoCapture(file_path)
-    if not cap.isOpened():
-        print("[ERROR] Could not open video file.")
-        return
+def play_h5_video(images1, images2=None, centroids=None, fps=20):
+    index = 0
+    total_frames = images1.shape[0]
+    paused = False
 
-    width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-    height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    duration = frame_count / fps if fps > 0 else 0
-    fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-    codec = "".join([chr((fourcc >> 8 * i) & 0xFF) for i in range(4)]).strip()
+    while True:
+        frame1 = images1[index]
+        frame2 = images2[index] if images2 is not None else None
 
-    output_lines = [
-        f"[VIDEO] Metadata for: {file_path}",
-        f"Frame Width: {width}  <-- (Header: 'CAP_PROP_FRAME_WIDTH')",
-        f"Frame Height: {height}  <-- (Header: 'CAP_PROP_FRAME_HEIGHT')",
-        f"FPS: {fps}  <-- (Header: 'CAP_PROP_FPS')",
-        f"Total Frames: {frame_count}  <-- (Header: 'CAP_PROP_FRAME_COUNT')",
-        f"Duration: {duration:.2f} seconds (calculated)",
-        f"Codec: {codec}  <-- (Header: 'CAP_PROP_FOURCC')"
-    ]
+        frame1 = cv2.cvtColor(frame1, cv2.COLOR_GRAY2BGR)
+        frame2 = cv2.cvtColor(frame2, cv2.COLOR_GRAY2BGR) if frame2 is not None else None
 
-    for line in output_lines:
-        print(line)
+        # Draw centroids
+        if centroids:
+            frame1 = draw_centroid(frame1,
+                                   centroids['xcen'][index] if centroids['xcen'] is not None else None,
+                                   centroids['ycen'][index] if centroids['ycen'] is not None else None,
+                                   color=(0, 255, 0), label="1")
+            if frame2 is not None:
+                frame2 = draw_centroid(frame2,
+                                       centroids['xcen2'][index] if centroids['xcen2'] is not None else None,
+                                       centroids['ycen2'][index] if centroids['ycen2'] is not None else None,
+                                       color=(255, 0, 0), label="2")
 
-    if export:
-        out_file = os.path.splitext(file_path)[0] + "_video_metadata.txt"
-        with open(out_file, 'w') as f_out:
-            f_out.write("\n".join(output_lines))
-        print(f"\n[INFO] Metadata exported to: {out_file}")
+        if frame2 is not None:
+            combined = np.hstack((frame1, frame2))
+        else:
+            combined = frame1
 
-    cap.release()
+        cv2.putText(combined, f"Frame: {index+1}/{total_frames}", (10, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        cv2.imshow("HDF5 Video Player", combined)
+        key = cv2.waitKey(0 if paused else int(1000 / fps))
+
+        if key == 27:  # ESC
+            break
+        elif key == ord(' '):  # Toggle pause
+            paused = not paused
+        elif key in [ord('d'), 83]:  # Next frame
+            index = min(index + 1, total_frames - 1)
+        elif key in [ord('a'), 81]:  # Previous frame
+            index = max(index - 1, 0)
+
+    cv2.destroyAllWindows()
 
 def main():
-    parser = argparse.ArgumentParser(description="Show raw metadata from HDF5 or video file.")
-    parser.add_argument("--export", action="store_true", help="Export metadata to a .txt file")
-    args = parser.parse_args()
-
-    file_path = select_file()
-    if not file_path:
+    filepath = select_h5_file()
+    if not filepath:
         print("[INFO] No file selected.")
         return
 
-    ext = os.path.splitext(file_path)[-1].lower()
-    try:
-        if ext in [".h5", ".hdf5"]:
-            show_hdf5_metadata(file_path, export=args.export)
-        elif ext in [".mp4", ".avi"]:
-            show_video_metadata(file_path, export=args.export)
-        else:
-            print("[ERROR] Unsupported file type.")
-    except Exception as e:
-        print(f"[ERROR] Failed to read metadata: {e}")
+    print(f"[INFO] Opening HDF5 file: {filepath}")
+    images1, images2, centroids = load_h5_frames_and_centroids(filepath)
+    print(f"[INFO] Loaded {images1.shape[0]} frames from 'images'")
+    if images2 is not None:
+        print(f"[INFO] Loaded {images2.shape[0]} frames from 'images2'")
+
+    play_h5_video(images1, images2, centroids)
 
 if __name__ == "__main__":
     main()
