@@ -1,5 +1,3 @@
-# atmosphere.py
-
 import os
 import cv2
 import h5py
@@ -132,17 +130,27 @@ def plot_motion(centroids):
     plt.tight_layout()
     plt.show()
 
-def show_preview(frames, centroids):
+def show_preview(frames, centroids, wait_ms=30):
+    print("[INFO] Showing centroid overlay preview...")
     for i, frame in enumerate(frames):
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
         if centroids[i] != (None, None):
             cv2.circle(frame_bgr, centroids[i], 4, (0, 0, 255), -1)
-        cv2.putText(frame_bgr, f"Frame {i+1}", (10, 25),
+        cv2.putText(frame_bgr, f"Frame {i+1}/{len(frames)}", (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.imshow("Preview", frame_bgr)
-        if cv2.waitKey(1) == 27:
+        cv2.imshow("Centroid Preview", frame_bgr)
+
+        key = cv2.waitKey(wait_ms)
+        if key == 27:  # ESC
+            print("[INFO] Preview interrupted by user.")
             break
+        elif key == ord(' '):  # Pause on space
+            print("[INFO] Paused. Press space again to continue.")
+            while cv2.waitKey(0) != ord(' '):
+                pass
+
     cv2.destroyAllWindows()
+    print("[INFO] Preview complete.")
 
 def analyze_file(file_path, preview=False, plot=False):
     try:
@@ -176,8 +184,13 @@ def analyze_file(file_path, preview=False, plot=False):
             csv_path = os.path.splitext(file_path)[0] + '_centroids.csv'
             save_to_csv(csv_path, centroids, dx, dy, movements, capture_fps)
 
+        # Show preview automatically or prompt user
         if preview:
             show_preview(frames, centroids)
+        else:
+            preview_prompt = input("Show preview now? (y/n): ").strip().lower()
+            if preview_prompt == 'y':
+                show_preview(frames, centroids)
 
     except Exception as e:
         print(f"[ERROR] Analysis failed: {e}")

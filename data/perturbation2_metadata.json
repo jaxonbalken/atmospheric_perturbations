@@ -1,0 +1,50 @@
+{
+    "datasets": {
+        "images": {
+            "shape": [
+                10000,
+                32,
+                32
+            ],
+            "dtype": "uint8",
+            "attrs": {}
+        },
+        "images2": {
+            "shape": [
+                10000,
+                32,
+                32
+            ],
+            "dtype": "uint8",
+            "attrs": {}
+        },
+        "xcen2_arcsec": {
+            "shape": [
+                10000
+            ],
+            "dtype": "float64",
+            "attrs": {}
+        },
+        "xcen_arcsec": {
+            "shape": [
+                10000
+            ],
+            "dtype": "float64",
+            "attrs": {}
+        },
+        "ycen2_arcsec": {
+            "shape": [
+                10000
+            ],
+            "dtype": "float64",
+            "attrs": {}
+        },
+        "ycen_arcsec": {
+            "shape": [
+                10000
+            ],
+            "dtype": "float64",
+            "attrs": {}
+        }
+    }
+}
